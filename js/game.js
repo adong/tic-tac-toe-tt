@@ -588,11 +588,71 @@
       return h;
     },
     clearHint: () => ST.hint(-1),
+    mode: () => G.mode,
+    // SPIN: his flip or bomb (js/rules.js mischief), chosen when he starts and done a moment later
+    mischief: () => (G.state === 'play' && G.round && !G.round.over && G.mode === 'spin' ? R.mischief(G.round, kid().mark) : null),
+    doMischief,
     players: () => [G.sides[0].actor, G.sides[1].actor],
     meet: () => spots.meet,
     homes: () => spots.sides,
     get flyers() { return flyers; },
   };
+
+  // Your brother's flip or bomb lands. The board may have changed since he picked it (a move in between): if that
+  // flip isn't allowed any more he picks again. Returns what happened, or null.
+  function doMischief(act) {
+    const st = G.round;
+    if (G.state !== 'play' || !st || st.over) return null;
+    const me = kid().mark;
+    if (act.kind === 'flip') {
+      const ok = R.mischiefOptions(st, me).flips.some((f) => f.cell === act.cell && f.to === act.to);
+      if (!ok) act = R.mischief(st, me);
+    } else if (!act.cells.some((i) => st.board[i])) act = R.mischief(st, me);
+    if (!act) return null;
+    const before = st.board.slice();
+    const ev = R.applyMischief(st, act);
+    if (!ev) return null;
+    const foe = G.sides[1];
+    if (ev.kind === 'flip') {
+      const i = ev.cells[0];
+      ST.spin(i, ev.from[0], ev.to[0], Math.random() < 0.5 ? 1 : -1);
+      TTT.sfx.spin(1);
+      const p = ST.cellPos(i);
+      bursts.add('FLIP!', p.x, ST.TOP + 1.2, p.z, 1.6, '#b8f5ff', '#2f7cf0');
+    } else {
+      ST.blast(ev.cells);
+      ST.shake(0.45);
+      TTT.sfx.boom();
+      const p = ST.cellPos(ev.cells[1]);
+      bursts.add('BOOM!', p.x, ST.TOP + 1.3, p.z, 2.2, '#ffd400', '#e8372c');
+      for (const i of ev.cells) {
+        const q = ST.cellPos(i);
+        flyers.add('💥', q.x, ST.TOP + 0.5, q.z, rand(-1, 1), rand(1.5, 3), 0.9, 0.6, rand(-3, 3), 2);
+        if (before[i]) flyers.add('💨', q.x, ST.TOP + 0.4, q.z, rand(-2, 2), rand(2, 4), 0.6, 0.9, rand(-2, 2), 3);
+      }
+    }
+    // who did it hit? the kid cheers when the CPU's marks went, and shrugs when it was his own
+    let mine = 0, theirs = 0;
+    ev.cells.forEach((i, k) => {
+      if (ev.from[k] === me) mine++;
+      else if (ev.from[k]) theirs++;
+    });
+    setTimeout(() => {
+      if (ev.win === me || theirs > mine) {
+        kid().actor.react('cheer');
+        foe.actor.react('oops');
+      } else if (mine > theirs) kid().actor.react('shrug');
+    }, 300);
+    ST.lock(st.lockRule && !st.over ? st.lock : -1);
+    if (ev.win) {
+      G.endEv = { gift: false };
+      G.endT = 0.9;
+      G.cpuT = -1;
+      G.waitT = -1;
+    }
+    updateTurnText();
+    return ev;
+  }
 
   // ---------------------------------------------------------------- input
 

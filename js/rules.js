@@ -339,6 +339,67 @@
     return null;
   }
 
+  // ---------------------------------------------------------------- SPIN: your brother's mischief
+
+  // Called in SPIN (1 player), your brother is a bit wild instead of giving a hint (Alan's idea). Half the time he
+  // FLIPS one mark: it turns empty, or into the other mark (X -> O, O -> X). The other half he drops a BOMB on a row
+  // or a column with marks in it, and those squares go empty. `kid` is the mark of the kid who called him; he's on
+  // your side, so a flip never finishes the other side's line (a flip that finishes yours wins you the round).
+  // options() lists every flip and bomb he may pick; with `wild` the flip that hands the other side a line is
+  // allowed too (only the checks use it, to prove they would catch it).
+  function mischiefOptions(st, kid, wild = false) {
+    const foe = other(kid), flips = [], bombs = [];
+    const b = st.board.slice();
+    for (let i = 0; i < 9; i++) {
+      const v = b[i];
+      if (!v) continue;
+      for (const to of [EMPTY, other(v)]) {
+        b[i] = to;
+        const m = lineMask(b);
+        b[i] = v;
+        if (m && m !== kid && !wild) continue; // that would finish the other side's line
+        flips.push({ kind: 'flip', cell: i, to, gives: m === foe });
+      }
+    }
+    for (let k = 0; k < 3; k++) {
+      const row = [k * 3, k * 3 + 1, k * 3 + 2], col = [k, k + 3, k + 6];
+      if (row.some((i) => b[i])) bombs.push({ kind: 'bomb', axis: 'row', cells: row });
+      if (col.some((i) => b[i])) bombs.push({ kind: 'bomb', axis: 'column', cells: col });
+    }
+    return { flips, bombs };
+  }
+
+  // His pick: a flip or a bomb, half and half (whichever there is). null on an empty board.
+  function mischief(st, kid, rng = Math.random, wild = false) {
+    if (st.over) return null;
+    const { flips, bombs } = mischiefOptions(st, kid, wild);
+    if (!flips.length && !bombs.length) return null;
+    const list = flips.length && (!bombs.length || rng() < 0.5) ? flips : bombs;
+    return list[Math.floor(rng() * list.length)];
+  }
+
+  // Do it to the board. It isn't a spin: the spin count and whose turn it is stay the same. Returns what changed,
+  // and the winner if a flip finished a line.
+  function applyMischief(st, act) {
+    if (st.over || !act) return null;
+    const ev = { kind: act.kind, axis: act.axis, cells: [], from: [], to: [], win: 0, line: null };
+    const cells = act.kind === 'flip' ? [act.cell] : act.cells;
+    for (const i of cells) {
+      ev.cells.push(i);
+      ev.from.push(st.board[i]);
+      st.board[i] = act.kind === 'flip' ? act.to : EMPTY;
+      ev.to.push(st.board[i]);
+    }
+    const L = linesOf(st.board);
+    if (L.mask) {
+      const w = L.mask === 3 ? st.turn : L.mask;
+      st.over = true;
+      st.winner = ev.win = w;
+      st.line = ev.line = (w === X ? L.x : L.o).slice();
+    }
+    return ev;
+  }
+
   // A small seeded random generator for the tests (mulberry32).
   function seeded(seed) {
     let a = seed >>> 0;
@@ -353,6 +414,6 @@
 
   TTT.rules = {
     EMPTY, X, O, LINES, SPIN_RULES, EASY, LOOK, other, spun, linesOf, lineMask, newRound, clone, legal, isLegal, play,
-    regularScores, spinScores, scores, winsFor, cpuMove, hint, judge, gives, seeded,
+    regularScores, spinScores, scores, winsFor, cpuMove, hint, judge, gives, mischiefOptions, mischief, applyMischief, seeded,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

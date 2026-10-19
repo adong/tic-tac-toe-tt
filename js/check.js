@@ -11,7 +11,10 @@
    Sabotage, to prove the checks can fail:
             { sabotage: 'shallow' }  the NORMAL CPU only looks one move ahead -> the tree search finds lost games
             { sabotage: 'nolimit' }  no draw rule in SPIN -> two bots that never finish a line play forever, and
-                                     games still going after 600 spins are reported */
+                                     games still going after 600 spins are reported
+            { sabotage: 'wildbrother' }  your brother's flips may finish the other side's line -> reported
+   MISCHIEF your brother in SPIN (flip a mark to empty or the other mark, or bomb a row or column) never hands the
+            other side the win: every flip and bomb on every board, and games where the kid keeps calling him. */
 (function (root) {
   'use strict';
   const TTT = (root.TTT = root.TTT || {});
@@ -229,6 +232,82 @@
     spin.bothLinesAtOnce = pairsSeen;
     if (pairsSeen) fail(`spin: ${pairsSeen} spins made both lines at once`);
     out.spin = spin;
+
+    // ---- SPIN: your brother's mischief (flip a mark to empty or the other mark, or bomb a row or column)
+    // He never hands the other side the win. Every board with no line, for a kid on either side:
+    const wild = sabotage === 'wildbrother';
+    const mis = { boards: 0, flips: 0, bombs: 0, flipsLeftOut: 0, games: 0, calls: 0, kidWinsByFlip: 0, foeWinsByFlip: 0, unfinished: 0 };
+    for (let code = 0; code < 19683; code++) {
+      let c = code;
+      for (let i = 0; i < 9; i++) {
+        b[i] = c % 3;
+        c = Math.floor(c / 3);
+      }
+      if (R.lineMask(b)) continue;
+      mis.boards++;
+      for (const kid of [X, O]) {
+        const st = R.newRound('spin', kid, rules);
+        st.board = b.slice();
+        const { flips, bombs } = R.mischiefOptions(st, kid, wild);
+        const marks = b.filter((v) => v).length;
+        // every mark can go two ways; the ones left out must be exactly those that finish the other side's line
+        let gives = 0;
+        for (let i = 0; i < 9; i++) {
+          if (!b[i]) continue;
+          for (const to of [0, R.other(b[i])]) {
+            const t = b.slice();
+            t[i] = to;
+            if (R.lineMask(t) === R.other(kid)) gives++;
+          }
+        }
+        if (!wild && flips.length !== marks * 2 - gives) fail(`mischief: board ${b.join('')} lists ${flips.length} flips, expected ${marks * 2 - gives}`);
+        mis.flipsLeftOut += gives;
+        for (const f of flips) {
+          const t = R.clone(st);
+          const ev = R.applyMischief(t, f);
+          mis.flips++;
+          if (ev.win && ev.win !== kid) fail(`mischief: on ${b.join('')} flipping square ${f.cell + 1} to ${f.to} hands the other side the win`);
+          if (t.spins !== st.spins || t.turn !== st.turn) fail('mischief: a flip changed the spin count or the turn');
+        }
+        for (const bo of bombs) {
+          mis.bombs++;
+          if (!bo.cells.some((i) => b[i])) fail(`mischief: a bomb on an empty ${bo.axis}`);
+          const t = R.clone(st);
+          const ev = R.applyMischief(t, bo);
+          if (ev.win || bo.cells.some((i) => t.board[i])) fail('mischief: a bomb left a mark or made a line');
+        }
+        if (!marks && R.mischief(st, kid, rng) !== null) fail('mischief: something to do on an empty board');
+      }
+    }
+    // games where the kid calls him on about a third of its turns: they still end, and he never loses one for the kid
+    for (const [kidBot, level] of [['kid', 'easy'], ['kid', 'normal'], ['random', 'normal'], ['careful', 'normal']]) {
+      for (let g = 0; g < Math.max(10, Math.round(games / 4)); g++) {
+        const kid = g % 2 ? X : O;
+        const st = R.newRound('spin', g % 4 < 2 ? X : O, rules);
+        let n = 0;
+        while (!st.over && n < cap) {
+          if (st.turn === kid && rng() < 0.33) {
+            mis.calls++;
+            const ev = R.applyMischief(st, R.mischief(st, kid, rng, wild));
+            if (ev && ev.win === kid) mis.kidWinsByFlip++;
+            if (ev && ev.win && ev.win !== kid) {
+              mis.foeWinsByFlip++;
+              fail(`mischief: in a game the brother's flip handed the CPU the win`);
+            }
+            if (st.over) break;
+          }
+          R.play(st, st.turn === kid ? BOTS[kidBot](st, rng) : R.cpuMove(st, level, rng));
+          n++;
+        }
+        mis.games++;
+        if (!st.over) {
+          mis.unfinished++;
+          fail('mischief: a game with the brother called never ended');
+        }
+        if (st.spins > rules.limit) fail(`mischief: a game went on for ${st.spins} spins`);
+      }
+    }
+    out.mischief = mis;
     return out;
   }
 

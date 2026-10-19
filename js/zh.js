@@ -17,7 +17,7 @@
     'Next round': '下一局', 'Home': '主页', 'Play again': '再玩一次', 'PLAY AGAIN': '再玩一次', 'Keep playing': '继续玩',
     'Start this round again': '这一局重新来',
     // canvas word bursts over the board (js/fx.js draws them through Kit.lang.t)
-    'NICE!': '好棋！', 'BLOCKED!': '堵住了！', 'SUPER!': '太棒了！', 'POOF!': '没啦！', 'OOPS!': '哎呀！',
+    'NICE!': '好棋！', 'BLOCKED!': '堵住了！', 'SUPER!': '太棒了！', 'FLIP!': '翻！', 'BOOM!': '轰！', 'POOF!': '没啦！', 'OOPS!': '哎呀！',
     // the ? panel (js/keys.js)
     'play a square (laid out like the number pad: 7 8 9 on top)': '下一个格子（和数字小键盘一样：7 8 9 在最上面）',
     'move round the board · play the square': '在棋盘上移动 · 下这个格子',
@@ -25,8 +25,8 @@
     'start this round again': '这一局重新来',
     'menu: REGULAR · SPIN': '菜单：普通模式 · 旋转模式',
     'menu: Teddy or Tommy · 1 or 2 players · level': '菜单：Teddy 还是 Tommy · 1 人或 2 人 · 难度',
-    'SPIN: a tap turns a square one step. Teddy: empty → X → O → empty. Tommy: empty → O → X → empty.':
-      '旋转模式：点一下，格子转一步。Teddy：空 → X → O → 空。Tommy：空 → O → X → 空。',
+    'SPIN: a tap turns a square one step. Teddy: empty → X → O → empty. Tommy: empty → O → X → empty. Call your brother and he flips a mark or drops a 💣 on a row!':
+      '旋转模式：点一下，格子转一步。Teddy：空 → X → O → 空。Tommy：空 → O → X → 空。叫兄弟来，他会翻掉一个，或者扔个 💣 炸掉一行！',
     "Tap a square to play it. Tap your brother's face (bottom right) to call him.": '点格子就能下棋。点右下角兄弟的头像，叫他来帮忙。',
   });
 
@@ -42,5 +42,9 @@
   L.rule(/^(\S+) WINS THE MATCH!$/, '$1 赢得比赛！');
   L.rule(/^(\S+) WINS!$/, '$1 赢啦！');
   L.rule(/^(\S+) SPUN IT FOR (\S+)!$/, '$1 帮 $2 转出来啦！');
+  L.rule(/^(\S+) FLIPPED ONE!$/, '$1 翻了一个！');
+  L.rule(/^💣 (\S+) BOMBED A ROW!$/, '💣 $1 炸掉了一行！');
+  L.rule(/^💣 (\S+) BOMBED A COLUMN!$/, '💣 $1 炸掉了一列！');
+  L.rule(/^(\S+): NOTHING TO FLIP YET!$/, '$1：还没有可以翻的！');
   L.rule(/^(\S+) (ICE CREAM|WATER|JUICE BOX|COOKIE|WATERMELON|BANANA) FROM (\S+)!$/, (m, emoji, item, who) => `${emoji} ${who} 给你${TREAT[item]}！`);
 })();

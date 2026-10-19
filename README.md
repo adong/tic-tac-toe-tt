@@ -68,8 +68,16 @@ The name is a working title. It lives in one constant, `TTT_TITLE` in `js/title.
 
 - **He pops in** next to the board in a puff of stars, at his roster `buddyScale` (a smaller Tommy, a slightly smaller Teddy), with his name tag.
 - **He says hi** with his signature move (Tommy's Y with peace fingers, Teddy's boxing combo) and **tosses you a treat** (🍦 💧 🧃 🍪 🍉 🍌) that arcs into your hand: "🧃 JUICE BOX FROM TOMMY!"
-- **He protects you with a hint:** he turns and points, the square glows gold with a bouncing 👇, and a toast says "TOMMY SAYS: HERE!" ("WIN HERE!" when it wins, "BLOCK HERE!" when it stops the CPU). On 🐣 Easy he points at the best square (from a look-ahead); on 🔥 Normal at the square that wins, else the one that blocks the CPU's win, else a good one. If it's the CPU's turn when he arrives, he waits for yours.
+- **In ⭕ REGULAR he protects you with a hint:** he turns and points, the square glows gold with a bouncing 👇, and a toast says "TOMMY SAYS: HERE!" ("WIN HERE!" when it wins, "BLOCK HERE!" when it stops the CPU). On 🐣 Easy he points at the best square (from a look-ahead); on 🔥 Normal at the square that wins, else the one that blocks the CPU's win, else a good one. If it's the CPU's turn when he arrives, he waits for yours.
 - **Once you've played**, he does his goodbye move and pops out. Call him again while he's there and he says hi again, brings another treat and points again.
+
+**1 player in 🌀 SPIN: he makes mischief instead** (Alan's idea). He pops in, says hi and tosses the treat the same way, then does one of two things, half and half:
+
+- **FLIP!** He points at a mark and it flips over: to empty, or to the other mark (X → O, O → X), picked at random. "TOMMY FLIPPED ONE!"
+- **BOOM!** He throws a 💣 (it whistles) onto a row or a column with marks in it. Everything there flies off and the screen shakes. "💣 TOMMY BOMBED A ROW!"
+- **It isn't anyone's turn and it isn't a spin:** the spin count and whose turn it is stay the same.
+- **He's on your side, just wild:** a flip never finishes the CPU's line. A flip that finishes *your* line wins you the round. A bomb can wipe out your marks too, and then you shrug.
+- Call him again while he's there for more mischief. On an empty board he has nothing to do: "TOMMY: NOTHING TO FLIP YET!"
 
 **2 players:** both brothers are already at the board, so **T** (or 🙌) is a **high five**: they run together behind the board, slap hands (both hands, 💥) and run back. It doesn't change the game.
 
@@ -114,6 +122,10 @@ node tools/check.js 200 --sabotage nolimit
 ```
 
 ```bash
+node tools/check.js 200 --sabotage wildbrother
+```
+
+```bash
 node tools/check.js rates
 ```
 
@@ -121,6 +133,7 @@ node tools/check.js rates
 - **SPIN: every game ends**, with a line or with the draw at exactly 30 spins, never later. Games between both CPU levels, the bots and a "staller" bot that never finishes a line in either direction.
 - **It can fail:** `--sabotage shallow` gives the CPU a one-move look-ahead, and the tree search finds 103,472 lost games as X and as O; `--sabotage nolimit` takes the draw rule away, and the staller games never end (all 50 still going after 600 spins). Both make the check fail.
 - **It also proves:** one spin can never make an X line and an O line at once (every board, every spin, either side), and the mirrored steps are right.
+- **Your brother's mischief in SPIN never loses you the round:** every flip and every bomb he could pick on every board without a line (11,125 boards, for a kid on either side) is tried, and the flips he leaves out are exactly the ones that would finish the other side's line. Then games where the kid calls him on a third of its turns: all end, and he never hands the CPU the win. `--sabotage wildbrother` lets him pick those flips too, and the check fails.
 - **At the last check** (1000 games per bot):
   - REGULAR tree: 16,752 games with the CPU as X and 16,752 as O, lost 0. Against the bots, 4,000 games, lost 0 (it drew itself every time).
   - SPIN: 2,000 games, all ended; the longest went the full 30 spins to a draw.
@@ -129,7 +142,7 @@ node tools/check.js rates
   - REGULAR, 🔥 NORMAL: no bot ever wins; the careful bot draws about half.
   - SPIN, 🐣 EASY: the kid-like bot wins 57%; the careful bot nearly always.
   - SPIN, 🔥 NORMAL: the careful bot wins 31% and draws the rest; the kid-like bot wins 3%.
-- **The browser:** whole matches in every mode and level were played through the real renderer (`game.auto`) to PLAY AGAIN, with no console errors. 中文: every screen visited in both modes and both player counts, and `Kit.lang.untranslated()` stayed `[]` (a planted string was caught). English: no Chinese anywhere except the kit's language button tooltip. Layouts checked by screenshot: 1024×768 and 768×1024 (iPad), phone upright 390×844, phone on its side 740×360.
+- **The browser:** whole matches in every mode and level were played through the real renderer (`game.auto`) to PLAY AGAIN, with no console errors; in SPIN also with the brother called at random about 180 times (flips and bombs, in English and 中文). 中文: every screen visited in both modes and both player counts, and `Kit.lang.untranslated()` stayed `[]` (a planted string was caught). English: no Chinese anywhere except the kit's language button tooltip. Layouts checked by screenshot: 1024×768 and 768×1024 (iPad), phone upright 390×844, phone on its side 740×360.
 - **Offline and the ? panel:** `index.html` and `dist/tic-tac-toe-tt.html` boot from `file://` in headless Chrome with real animation frames. With the ? panel open on the single page, the game's clock, its frames and `performance.now()` stood still and ran on after it closed, in 8 of 9 runs; in the first run one more frame landed after the test's starting point (probably a frame already on its way when the panel opened).
 
 ## Files
@@ -137,11 +150,11 @@ node tools/check.js rates
 ```
 index.html               page, HUD, menus, panels (CSS inline)
 js/title.js              the game's name (one constant)
-js/rules.js              the rules of both modes, the CPU, the hint, the good-move judge (no Three.js)
+js/rules.js              the rules of both modes, the CPU, the hint, your brother's mischief, the good-move judge (no Three.js)
 js/check.js              the headless checks, the test bots and the win-rate report (game.check, game.rates, tools/check.js)
 js/stage.js              the garden, the board, tiles, marks, the flip and drop, the hint glow, the camera fit, picking
 js/actor.js              a boy beside the board: poses, reactions, treats (from Tommy's Toy Box, plus shrug, think, point, high five)
-js/buddy.js              your brother's visit, and the 2-player high five
+js/buddy.js              your brother's visit (a hint in REGULAR, a flip or a 💣 in SPIN), and the 2-player high five
 js/fx.js                 emoji flyers, word bursts, confetti
 js/sfx.js                game sounds on top of Kit.sound
 js/game.js               the match, turns, the CPU's timing, scoreboard, screens, input, main loop, window.game hooks

@@ -11,6 +11,6 @@ Kit.help.setup({
     ['menu: REGULAR · SPIN', '1 · 2'],
     ['menu: Teddy or Tommy · 1 or 2 players · level', '← → · ↑ ↓ · L'],
   ],
-  note: 'SPIN: a tap turns a square one step. Teddy: empty → X → O → empty. Tommy: empty → O → X → empty.',
+  note: 'SPIN: a tap turns a square one step. Teddy: empty → X → O → empty. Tommy: empty → O → X → empty. Call your brother and he flips a mark or drops a 💣 on a row!',
   touch: 'Tap a square to play it. Tap your brother\'s face (bottom right) to call him.',
 });

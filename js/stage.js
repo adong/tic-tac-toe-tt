@@ -6,6 +6,8 @@
      set(board)          show a board straight away (a new round)
      win(line)           a glowing bar across the line, and its marks bounce
      hint(i)             the square glows gold with a bouncing 👇 (your brother's tip); hint(-1) clears it
+     blast(cells)        your brother's 💣 lands: the marks there fly up and away, and the tiles hop
+     shake(secs)         the camera shakes for a moment
      cursor(i), hover(i, state), lock(i)
      pick(x, y)          the square under a screen point, or -1
    fit(points, elev, margins) aims the camera so world points fill the screen minus margins (in pixels). */
@@ -27,7 +29,8 @@
   const scene = new T.Scene();
   const cam = new T.PerspectiveCamera(36, 1, 0.1, 300);
   const cells = [];
-  const fx = { line: null, lineT: -1, lineCells: null, hint: -1, hintT: 0, cursor: -1, hover: -1, hoverState: 0, lock: -1, t: 0 };
+  const fx = { line: null, lineT: -1, lineCells: null, hint: -1, hintT: 0, cursor: -1, hover: -1, hoverState: 0, lock: -1, t: 0, shake: 0 };
+  const camBase = new T.Vector3();
   let board = null, glowMesh = null, finger = null, ring = null, lockSprite = null;
   const ghosts = { 1: null, 2: null };
 
@@ -348,6 +351,17 @@
     c.anim = { kind: 'drop', t: 0, dur: 0.42 };
   }
 
+  // The 💣: every mark in these squares flies up spinning and vanishes, and every tile hops.
+  function blast(list) {
+    for (const i of list) {
+      const c = cells[i];
+      c.anim = { kind: 'blast', t: Math.random() * -0.08, dur: 0.55 };
+    }
+  }
+  function shake(secs) {
+    fx.shake = Math.max(fx.shake, secs);
+  }
+
   // SPIN: the tile hops and flips over (dir 1 rolls it away from you, -1 towards you); the mark changes half way.
   function spin(i, from, to, dir = 1) {
     const c = cells[i];
@@ -432,6 +446,17 @@
             const sq = Math.sin(k * Math.PI) * 0.35 * (1 - k);
             m.scale.set(1 + sq, 1 - sq * 1.6, 1 + sq);
           }
+        } else if (a.kind === 'blast') {
+          // the mark shoots up, spins and shrinks away; the tile bounces
+          const k = Math.max(0, u);
+          c.pivot.position.y = c.home.y + Math.sin(k * Math.PI) * 0.45;
+          m.position.y = TILE_H / 2 + 0.1 + k * 2.6;
+          m.rotation.y = k * 9;
+          m.scale.setScalar(Math.max(0.01, 1 - k));
+          if (u >= 1) {
+            show(c, 0);
+            m.rotation.y = 0;
+          }
         } else {
           // a hop and a full turn about the x axis; the mark changes when the tile is upside down
           c.pivot.rotation.x = a.dir * ease(u) * Math.PI * 2;
@@ -496,6 +521,16 @@
       g.visible = true;
       g.position.set(p.x, TOP + 0.45 + Math.sin(fx.t * 4) * 0.06, p.z);
     }
+    // the camera shake (from the 💣)
+    if (fx.shake > 0) {
+      fx.shake = Math.max(0, fx.shake - dt);
+      const amp = fx.shake * 0.35;
+      cam.position.set(camBase.x + (Math.random() - 0.5) * amp, camBase.y + (Math.random() - 0.5) * amp, camBase.z + (Math.random() - 0.5) * amp);
+      cam.updateMatrixWorld(true);
+    } else if (!cam.position.equals(camBase) && camBase.lengthSq()) {
+      cam.position.copy(camBase);
+      cam.updateMatrixWorld(true);
+    }
     lockSprite.visible = fx.lock >= 0;
     if (fx.lock >= 0) {
       const p = cellPos(fx.lock, tmp);
@@ -556,6 +591,7 @@
     const bx = (m.l + W - m.r) / 2, by = (m.t + H - m.b) / 2;
     cam.setViewOffset(W, H, W / 2 - bx, H / 2 - by, W, H);
     cam.updateMatrixWorld(true);
+    camBase.copy(cam.position);
     return center;
   }
 
@@ -584,7 +620,7 @@
   }
 
   TTT.stage = {
-    init, resize, render, update, fit, pick, toScreen, cellPos, set, place, spin, win, clearWin, hint, cursor, hover, lock,
+    init, resize, render, update, fit, pick, toScreen, cellPos, set, place, spin, blast, shake, win, clearWin, hint, cursor, hover, lock,
     scene, cam, HALF, TOP, PITCH, TILE, PAD, COL,
     busy: () => cells.some((c) => c.anim),
     get W() { return W; },

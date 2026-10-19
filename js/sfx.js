@@ -72,6 +72,14 @@
       tone({ f: 300, to: 900, dur: 0.12, vol: 0.1 });
       hiss({ f: 2000, to: 6000, dur: 0.15, vol: 0.05 });
     },
+    // your brother's 💣 falls: a cartoon whistle down
+    whistle() { tone({ f: 1500, to: 500, dur: 0.75, vol: 0.06 }); },
+    // and lands: BOOM, a low thump and a rumble
+    boom() {
+      tone({ f: 140, to: 38, dur: 0.55, vol: 0.32 });
+      hiss({ filter: 'lowpass', f: 1600, to: 90, dur: 0.75, vol: 0.32 });
+      hiss({ filter: 'bandpass', f: 3000, to: 600, dur: 0.25, vol: 0.12, q: 0.7 });
+    },
     // the high five: a clap
     clap() {
       hiss({ filter: 'bandpass', f: 1500, q: 0.8, dur: 0.09, vol: 0.22 });

@@ -5,6 +5,9 @@
      ("TOMMY SAYS: HERE!") → once you've played, his goodbye move → pop out.
    If it's the CPU's turn when he arrives, he waits for yours before he points. Calling him again while he's there
    brings another treat and points again (at the best square for the board as it is now).
+   In SPIN he doesn't give a hint: he makes mischief (Alan's idea). After the treat he either points at a mark and
+   FLIPS it (to empty, or X <-> O), or throws a 💣 that lands on a row or a column and BOOM, it's wiped clean. It isn't
+   anyone's turn and it isn't a spin, and he's on your side: a flip never finishes the CPU's line (js/rules.js).
    In 2 players both brothers are already at the board, so T is a high five (TTT.highFive): they run together,
    slap hands and run back. It doesn't change the game. */
 (function () {
@@ -13,14 +16,15 @@
   const TTT = (window.TTT = window.TTT || {});
   const { pick, emojiTexture, rand } = Kit.gfx;
 
-  const V = { pop: 0.35, treatAt: 2.1, throwAt: 2.4, helpAt: 2.7, byeAfter: 0.7, maxWait: 14 };
+  const V = { pop: 0.35, treatAt: 2.1, throwAt: 2.4, helpAt: 2.7, byeAfter: 0.7, maxWait: 14, flipAfter: 0.55, bombFlight: 0.8, misBye: 1.4 };
   const TREATS = [['🍦', 'ICE CREAM'], ['💧', 'WATER'], ['🧃', 'JUICE BOX'], ['🍪', 'COOKIE'], ['🍉', 'WATERMELON'], ['🍌', 'BANANA']];
 
   let api = null, entry = null, flyers = null;
   const actor = TTT.makeActor();
   // phase: off | in | here | bye | out
-  const b = { phase: 'off', t: 0, given: false, treatAt: V.treatAt, helped: -1, pointing: -1, movedAt: -1, calls: 0, treats: 0, hints: 0, lastTreat: null, popT: 0, lastHint: null };
+  const b = { phase: 'off', t: 0, given: false, treatAt: V.treatAt, helped: -1, pointing: -1, movedAt: -1, calls: 0, treats: 0, hints: 0, lastTreat: null, popT: 0, lastHint: null, mis: null, misDone: false, flips: 0, bombs: 0, lastMischief: null };
   const treat = { sprite: null, flyT: -1, emoji: '', from: new T.Vector3(), to: new T.Vector3() };
+  const bomb = { sprite: null, from: new T.Vector3(), to: new T.Vector3() };
   const tmp = new T.Vector3();
 
   function init(a) {
@@ -29,6 +33,10 @@
     treat.sprite.visible = false;
     treat.sprite.renderOrder = 22;
     TTT.stage.scene.add(treat.sprite);
+    bomb.sprite = new T.Sprite(new T.SpriteMaterial({ map: emojiTexture('💣'), depthWrite: false, depthTest: false, transparent: true }));
+    bomb.sprite.visible = false;
+    bomb.sprite.renderOrder = 22;
+    TTT.stage.scene.add(bomb.sprite);
     flyers = a.flyers;
     actor.attach(TTT.stage.scene, flyers);
     actor.visible = false;
@@ -62,6 +70,7 @@
     b.treatAt = b.t + 1.5;
     b.helped = -1;
     b.movedAt = -1;
+    if (!b.mis) b.misDone = false;
     b.popT = Math.max(b.popT, V.pop);
     api.toast(`${entry.name}'S HERE!`, 'buddy');
     TTT.sfx.pop();
@@ -70,7 +79,7 @@
 
   function summon() {
     const s = api.spot();
-    Object.assign(b, { phase: 'in', t: 0, given: false, treatAt: V.treatAt, helped: -1, pointing: -1, movedAt: -1, popT: 0 });
+    Object.assign(b, { phase: 'in', t: 0, given: false, treatAt: V.treatAt, helped: -1, pointing: -1, movedAt: -1, popT: 0, mis: null, misDone: false });
     actor.setScale(0.01);
     actor.place(s.x, 0, s.z);
     actor.face = null;
@@ -89,13 +98,15 @@
     actor.visible = false;
     treat.flyT = -1;
     if (treat.sprite) treat.sprite.visible = false;
+    if (bomb.sprite) bomb.sprite.visible = false;
+    b.mis = null;
     if (b.pointing >= 0 && api) api.clearHint();
     b.pointing = -1;
   }
 
   // You played a square: the hint has done its job.
   function moved() {
-    if (b.phase === 'here' && b.pointing >= 0) {
+    if (b.phase === 'here' && b.pointing >= 0 && !b.mis) {
       b.pointing = -1;
       b.movedAt = b.t;
     }
@@ -171,8 +182,12 @@
         b.given = true;
         giveTreat();
       }
-      // the hint: once the treat's on its way and it's your turn
-      if (b.given && b.t > Math.max(V.helpAt, b.treatAt + 0.5) && b.helped !== api.turnId() && b.movedAt < 0) {
+      const ready = b.given && b.t > Math.max(V.helpAt, b.treatAt + 0.5) && b.movedAt < 0;
+      // SPIN: mischief instead of a hint, once per call
+      if (api.mode() === 'spin') {
+        if (ready && !b.mis && !b.misDone) startMischief();
+      } else if (ready && b.helped !== api.turnId()) {
+        // the hint: once the treat's on its way and it's your turn
         const h = api.canHint() ? api.showHint() : null;
         if (h) {
           b.helped = api.turnId();
@@ -184,6 +199,7 @@
           TTT.sfx.nice();
         }
       }
+      updateMischief(dt);
       if (b.pointing >= 0) {
         // face the square and point at it
         TTT.stage.cellPos(b.pointing, tmp);
@@ -192,7 +208,7 @@
         if (actor.mode !== 'signature') actor.act('point', 0.3, 0);
       } else actor.face = null;
       // leave a moment after you've played, or if the round's over and nothing's left to do
-      const idle = b.given && b.pointing < 0 && treat.flyT < 0;
+      const idle = b.given && b.pointing < 0 && treat.flyT < 0 && !b.mis;
       if ((b.movedAt >= 0 && b.t > b.movedAt + V.byeAfter) || (idle && b.t > V.maxWait) || (idle && api.roundOver() && b.t > V.helpAt + 1.2)) {
         b.phase = 'bye';
         b.t = 0;
@@ -215,6 +231,74 @@
       }
     }
     actor.update(dt);
+  }
+
+  // ---------------------------------------------------------------- SPIN: a flip or a bomb
+
+  function startMischief() {
+    const act = api.mischief();
+    if (!act) {
+      b.misDone = true;
+      b.movedAt = b.t;
+      if (!api.roundOver()) api.toast(`${entry.name}: NOTHING TO FLIP YET!`, 'hint');
+      return;
+    }
+    b.mis = { act, t: 0 };
+    if (act.kind === 'flip') {
+      b.pointing = act.cell; // he points at it for a moment, then it flips
+    } else {
+      // a 💣 from his hand to the middle of the row or column
+      actor.act('give', 0.5, 0, true);
+      actor.root.updateMatrixWorld(true);
+      Kit.people.handWorld(actor.person, 1, bomb.from);
+      TTT.stage.cellPos(act.cells[1], bomb.to);
+      bomb.sprite.position.copy(bomb.from);
+      bomb.sprite.scale.setScalar(0.75);
+      bomb.sprite.visible = true;
+      TTT.sfx.whistle();
+    }
+  }
+
+  function updateMischief(dt) {
+    const m = b.mis;
+    if (!m) return;
+    m.t += dt;
+    if (api.roundOver()) {
+      // the round ended under him: never mind
+      bomb.sprite.visible = false;
+      b.mis = null;
+      b.misDone = true;
+      b.pointing = -1;
+      return;
+    }
+    const act = m.act;
+    let done = false;
+    if (act.kind === 'flip') done = m.t >= V.flipAfter;
+    else {
+      const k = Math.min(1, m.t / V.bombFlight);
+      bomb.sprite.position.lerpVectors(bomb.from, bomb.to, k);
+      bomb.sprite.position.y += Math.sin(k * Math.PI) * 2.4;
+      bomb.sprite.material.rotation = k * Math.PI * 3;
+      done = k >= 1;
+    }
+    if (!done) return;
+    bomb.sprite.visible = false;
+    bomb.sprite.material.rotation = 0;
+    b.pointing = -1;
+    b.mis = null;
+    b.misDone = true;
+    b.movedAt = b.t + V.misBye - V.byeAfter;
+    const ev = api.doMischief(act);
+    if (!ev) return;
+    b.lastMischief = { kind: ev.kind, axis: ev.axis, cells: ev.cells, win: ev.win };
+    if (ev.kind === 'flip') {
+      b.flips++;
+      api.toast(`${entry.name} FLIPPED ONE!`, 'save');
+    } else {
+      b.bombs++;
+      api.toast(`💣 ${entry.name} BOMBED A ${ev.axis === 'row' ? 'ROW' : 'COLUMN'}!`, 'save');
+    }
+    actor.react('hop');
   }
 
   // ---------------------------------------------------------------- 2 players: the high five
@@ -293,6 +377,7 @@
       return {
         phase: b.phase, id: entry && entry.id, t: +b.t.toFixed(2), given: b.given, pointing: b.pointing, calls: b.calls,
         treats: b.treats, hints: b.hints, lastTreat: b.lastTreat, lastHint: b.lastHint, pose: actor.pose,
+        flips: b.flips, bombs: b.bombs, lastMischief: b.lastMischief, mischiefOn: !!b.mis,
         x: +r.x.toFixed(2), z: +r.z.toFixed(2), scale: +actor.scale.toFixed(2), visible: actor.visible, flying: treat.flyT >= 0,
         highFives: hf.count, highFiving: hf.on,
       };

@@ -4,6 +4,7 @@
      node tools/check.js 1000                 the same with 1000 games per bot (default 200)
      node tools/check.js --sabotage shallow   proves the CPU check can fail: a one-move-deep CPU loses games
      node tools/check.js --sabotage nolimit   proves the spin check can fail: with no draw rule, games never end
+     node tools/check.js --sabotage wildbrother  proves the brother check can fail: his flips may lose you the round
      node tools/check.js --lock               SPIN with the "can't spin the square just spun" rule switched on
      node tools/check.js rates                win rates of the kids' test bots against both levels (how they were tuned)
 */

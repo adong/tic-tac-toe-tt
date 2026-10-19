@@ -2042,6 +2042,67 @@ document.title = `${window.TTT_TITLE} · Teddy & Tommy`;
     return null;
   }
 
+  // ---------------------------------------------------------------- SPIN: your brother's mischief
+
+  // Called in SPIN (1 player), your brother is a bit wild instead of giving a hint (Alan's idea). Half the time he
+  // FLIPS one mark: it turns empty, or into the other mark (X -> O, O -> X). The other half he drops a BOMB on a row
+  // or a column with marks in it, and those squares go empty. `kid` is the mark of the kid who called him; he's on
+  // your side, so a flip never finishes the other side's line (a flip that finishes yours wins you the round).
+  // options() lists every flip and bomb he may pick; with `wild` the flip that hands the other side a line is
+  // allowed too (only the checks use it, to prove they would catch it).
+  function mischiefOptions(st, kid, wild = false) {
+    const foe = other(kid), flips = [], bombs = [];
+    const b = st.board.slice();
+    for (let i = 0; i < 9; i++) {
+      const v = b[i];
+      if (!v) continue;
+      for (const to of [EMPTY, other(v)]) {
+        b[i] = to;
+        const m = lineMask(b);
+        b[i] = v;
+        if (m && m !== kid && !wild) continue; // that would finish the other side's line
+        flips.push({ kind: 'flip', cell: i, to, gives: m === foe });
+      }
+    }
+    for (let k = 0; k < 3; k++) {
+      const row = [k * 3, k * 3 + 1, k * 3 + 2], col = [k, k + 3, k + 6];
+      if (row.some((i) => b[i])) bombs.push({ kind: 'bomb', axis: 'row', cells: row });
+      if (col.some((i) => b[i])) bombs.push({ kind: 'bomb', axis: 'column', cells: col });
+    }
+    return { flips, bombs };
+  }
+
+  // His pick: a flip or a bomb, half and half (whichever there is). null on an empty board.
+  function mischief(st, kid, rng = Math.random, wild = false) {
+    if (st.over) return null;
+    const { flips, bombs } = mischiefOptions(st, kid, wild);
+    if (!flips.length && !bombs.length) return null;
+    const list = flips.length && (!bombs.length || rng() < 0.5) ? flips : bombs;
+    return list[Math.floor(rng() * list.length)];
+  }
+
+  // Do it to the board. It isn't a spin: the spin count and whose turn it is stay the same. Returns what changed,
+  // and the winner if a flip finished a line.
+  function applyMischief(st, act) {
+    if (st.over || !act) return null;
+    const ev = { kind: act.kind, axis: act.axis, cells: [], from: [], to: [], win: 0, line: null };
+    const cells = act.kind === 'flip' ? [act.cell] : act.cells;
+    for (const i of cells) {
+      ev.cells.push(i);
+      ev.from.push(st.board[i]);
+      st.board[i] = act.kind === 'flip' ? act.to : EMPTY;
+      ev.to.push(st.board[i]);
+    }
+    const L = linesOf(st.board);
+    if (L.mask) {
+      const w = L.mask === 3 ? st.turn : L.mask;
+      st.over = true;
+      st.winner = ev.win = w;
+      st.line = ev.line = (w === X ? L.x : L.o).slice();
+    }
+    return ev;
+  }
+
   // A small seeded random generator for the tests (mulberry32).
   function seeded(seed) {
     let a = seed >>> 0;
@@ -2056,7 +2117,7 @@ document.title = `${window.TTT_TITLE} · Teddy & Tommy`;
 
   TTT.rules = {
     EMPTY, X, O, LINES, SPIN_RULES, EASY, LOOK, other, spun, linesOf, lineMask, newRound, clone, legal, isLegal, play,
-    regularScores, spinScores, scores, winsFor, cpuMove, hint, judge, gives, seeded,
+    regularScores, spinScores, scores, winsFor, cpuMove, hint, judge, gives, mischiefOptions, mischief, applyMischief, seeded,
   };
 })(typeof window !== 'undefined' ? window : globalThis);
 
@@ -2075,7 +2136,10 @@ document.title = `${window.TTT_TITLE} · Teddy & Tommy`;
    Sabotage, to prove the checks can fail:
             { sabotage: 'shallow' }  the NORMAL CPU only looks one move ahead -> the tree search finds lost games
             { sabotage: 'nolimit' }  no draw rule in SPIN -> two bots that never finish a line play forever, and
-                                     games still going after 600 spins are reported */
+                                     games still going after 600 spins are reported
+            { sabotage: 'wildbrother' }  your brother's flips may finish the other side's line -> reported
+   MISCHIEF your brother in SPIN (flip a mark to empty or the other mark, or bomb a row or column) never hands the
+            other side the win: every flip and bomb on every board, and games where the kid keeps calling him. */
 (function (root) {
   'use strict';
   const TTT = (root.TTT = root.TTT || {});
@@ -2293,6 +2357,82 @@ document.title = `${window.TTT_TITLE} · Teddy & Tommy`;
     spin.bothLinesAtOnce = pairsSeen;
     if (pairsSeen) fail(`spin: ${pairsSeen} spins made both lines at once`);
     out.spin = spin;
+
+    // ---- SPIN: your brother's mischief (flip a mark to empty or the other mark, or bomb a row or column)
+    // He never hands the other side the win. Every board with no line, for a kid on either side:
+    const wild = sabotage === 'wildbrother';
+    const mis = { boards: 0, flips: 0, bombs: 0, flipsLeftOut: 0, games: 0, calls: 0, kidWinsByFlip: 0, foeWinsByFlip: 0, unfinished: 0 };
+    for (let code = 0; code < 19683; code++) {
+      let c = code;
+      for (let i = 0; i < 9; i++) {
+        b[i] = c % 3;
+        c = Math.floor(c / 3);
+      }
+      if (R.lineMask(b)) continue;
+      mis.boards++;
+      for (const kid of [X, O]) {
+        const st = R.newRound('spin', kid, rules);
+        st.board = b.slice();
+        const { flips, bombs } = R.mischiefOptions(st, kid, wild);
+        const marks = b.filter((v) => v).length;
+        // every mark can go two ways; the ones left out must be exactly those that finish the other side's line
+        let gives = 0;
+        for (let i = 0; i < 9; i++) {
+          if (!b[i]) continue;
+          for (const to of [0, R.other(b[i])]) {
+            const t = b.slice();
+            t[i] = to;
+            if (R.lineMask(t) === R.other(kid)) gives++;
+          }
+        }
+        if (!wild && flips.length !== marks * 2 - gives) fail(`mischief: board ${b.join('')} lists ${flips.length} flips, expected ${marks * 2 - gives}`);
+        mis.flipsLeftOut += gives;
+        for (const f of flips) {
+          const t = R.clone(st);
+          const ev = R.applyMischief(t, f);
+          mis.flips++;
+          if (ev.win && ev.win !== kid) fail(`mischief: on ${b.join('')} flipping square ${f.cell + 1} to ${f.to} hands the other side the win`);
+          if (t.spins !== st.spins || t.turn !== st.turn) fail('mischief: a flip changed the spin count or the turn');
+        }
+        for (const bo of bombs) {
+          mis.bombs++;
+          if (!bo.cells.some((i) => b[i])) fail(`mischief: a bomb on an empty ${bo.axis}`);
+          const t = R.clone(st);
+          const ev = R.applyMischief(t, bo);
+          if (ev.win || bo.cells.some((i) => t.board[i])) fail('mischief: a bomb left a mark or made a line');
+        }
+        if (!marks && R.mischief(st, kid, rng) !== null) fail('mischief: something to do on an empty board');
+      }
+    }
+    // games where the kid calls him on about a third of its turns: they still end, and he never loses one for the kid
+    for (const [kidBot, level] of [['kid', 'easy'], ['kid', 'normal'], ['random', 'normal'], ['careful', 'normal']]) {
+      for (let g = 0; g < Math.max(10, Math.round(games / 4)); g++) {
+        const kid = g % 2 ? X : O;
+        const st = R.newRound('spin', g % 4 < 2 ? X : O, rules);
+        let n = 0;
+        while (!st.over && n < cap) {
+          if (st.turn === kid && rng() < 0.33) {
+            mis.calls++;
+            const ev = R.applyMischief(st, R.mischief(st, kid, rng, wild));
+            if (ev && ev.win === kid) mis.kidWinsByFlip++;
+            if (ev && ev.win && ev.win !== kid) {
+              mis.foeWinsByFlip++;
+              fail(`mischief: in a game the brother's flip handed the CPU the win`);
+            }
+            if (st.over) break;
+          }
+          R.play(st, st.turn === kid ? BOTS[kidBot](st, rng) : R.cpuMove(st, level, rng));
+          n++;
+        }
+        mis.games++;
+        if (!st.over) {
+          mis.unfinished++;
+          fail('mischief: a game with the brother called never ended');
+        }
+        if (st.spins > rules.limit) fail(`mischief: a game went on for ${st.spins} spins`);
+      }
+    }
+    out.mischief = mis;
     return out;
   }
 
@@ -2401,6 +2541,14 @@ document.title = `${window.TTT_TITLE} · Teddy & Tommy`;
     pop() {
       tone({ f: 300, to: 900, dur: 0.12, vol: 0.1 });
       hiss({ f: 2000, to: 6000, dur: 0.15, vol: 0.05 });
+    },
+    // your brother's 💣 falls: a cartoon whistle down
+    whistle() { tone({ f: 1500, to: 500, dur: 0.75, vol: 0.06 }); },
+    // and lands: BOOM, a low thump and a rumble
+    boom() {
+      tone({ f: 140, to: 38, dur: 0.55, vol: 0.32 });
+      hiss({ filter: 'lowpass', f: 1600, to: 90, dur: 0.75, vol: 0.32 });
+      hiss({ filter: 'bandpass', f: 3000, to: 600, dur: 0.25, vol: 0.12, q: 0.7 });
     },
     // the high five: a clap
     clap() {
@@ -3054,6 +3202,8 @@ document.title = `${window.TTT_TITLE} · Teddy & Tommy`;
      set(board)          show a board straight away (a new round)
      win(line)           a glowing bar across the line, and its marks bounce
      hint(i)             the square glows gold with a bouncing 👇 (your brother's tip); hint(-1) clears it
+     blast(cells)        your brother's 💣 lands: the marks there fly up and away, and the tiles hop
+     shake(secs)         the camera shakes for a moment
      cursor(i), hover(i, state), lock(i)
      pick(x, y)          the square under a screen point, or -1
    fit(points, elev, margins) aims the camera so world points fill the screen minus margins (in pixels). */
@@ -3075,7 +3225,8 @@ document.title = `${window.TTT_TITLE} · Teddy & Tommy`;
   const scene = new T.Scene();
   const cam = new T.PerspectiveCamera(36, 1, 0.1, 300);
   const cells = [];
-  const fx = { line: null, lineT: -1, lineCells: null, hint: -1, hintT: 0, cursor: -1, hover: -1, hoverState: 0, lock: -1, t: 0 };
+  const fx = { line: null, lineT: -1, lineCells: null, hint: -1, hintT: 0, cursor: -1, hover: -1, hoverState: 0, lock: -1, t: 0, shake: 0 };
+  const camBase = new T.Vector3();
   let board = null, glowMesh = null, finger = null, ring = null, lockSprite = null;
   const ghosts = { 1: null, 2: null };
 
@@ -3396,6 +3547,17 @@ document.title = `${window.TTT_TITLE} · Teddy & Tommy`;
     c.anim = { kind: 'drop', t: 0, dur: 0.42 };
   }
 
+  // The 💣: every mark in these squares flies up spinning and vanishes, and every tile hops.
+  function blast(list) {
+    for (const i of list) {
+      const c = cells[i];
+      c.anim = { kind: 'blast', t: Math.random() * -0.08, dur: 0.55 };
+    }
+  }
+  function shake(secs) {
+    fx.shake = Math.max(fx.shake, secs);
+  }
+
   // SPIN: the tile hops and flips over (dir 1 rolls it away from you, -1 towards you); the mark changes half way.
   function spin(i, from, to, dir = 1) {
     const c = cells[i];
@@ -3480,6 +3642,17 @@ document.title = `${window.TTT_TITLE} · Teddy & Tommy`;
             const sq = Math.sin(k * Math.PI) * 0.35 * (1 - k);
             m.scale.set(1 + sq, 1 - sq * 1.6, 1 + sq);
           }
+        } else if (a.kind === 'blast') {
+          // the mark shoots up, spins and shrinks away; the tile bounces
+          const k = Math.max(0, u);
+          c.pivot.position.y = c.home.y + Math.sin(k * Math.PI) * 0.45;
+          m.position.y = TILE_H / 2 + 0.1 + k * 2.6;
+          m.rotation.y = k * 9;
+          m.scale.setScalar(Math.max(0.01, 1 - k));
+          if (u >= 1) {
+            show(c, 0);
+            m.rotation.y = 0;
+          }
         } else {
           // a hop and a full turn about the x axis; the mark changes when the tile is upside down
           c.pivot.rotation.x = a.dir * ease(u) * Math.PI * 2;
@@ -3544,6 +3717,16 @@ document.title = `${window.TTT_TITLE} · Teddy & Tommy`;
       g.visible = true;
       g.position.set(p.x, TOP + 0.45 + Math.sin(fx.t * 4) * 0.06, p.z);
     }
+    // the camera shake (from the 💣)
+    if (fx.shake > 0) {
+      fx.shake = Math.max(0, fx.shake - dt);
+      const amp = fx.shake * 0.35;
+      cam.position.set(camBase.x + (Math.random() - 0.5) * amp, camBase.y + (Math.random() - 0.5) * amp, camBase.z + (Math.random() - 0.5) * amp);
+      cam.updateMatrixWorld(true);
+    } else if (!cam.position.equals(camBase) && camBase.lengthSq()) {
+      cam.position.copy(camBase);
+      cam.updateMatrixWorld(true);
+    }
     lockSprite.visible = fx.lock >= 0;
     if (fx.lock >= 0) {
       const p = cellPos(fx.lock, tmp);
@@ -3604,6 +3787,7 @@ document.title = `${window.TTT_TITLE} · Teddy & Tommy`;
     const bx = (m.l + W - m.r) / 2, by = (m.t + H - m.b) / 2;
     cam.setViewOffset(W, H, W / 2 - bx, H / 2 - by, W, H);
     cam.updateMatrixWorld(true);
+    camBase.copy(cam.position);
     return center;
   }
 
@@ -3632,7 +3816,7 @@ document.title = `${window.TTT_TITLE} · Teddy & Tommy`;
   }
 
   TTT.stage = {
-    init, resize, render, update, fit, pick, toScreen, cellPos, set, place, spin, win, clearWin, hint, cursor, hover, lock,
+    init, resize, render, update, fit, pick, toScreen, cellPos, set, place, spin, blast, shake, win, clearWin, hint, cursor, hover, lock,
     scene, cam, HALF, TOP, PITCH, TILE, PAD, COL,
     busy: () => cells.some((c) => c.anim),
     get W() { return W; },
@@ -3651,6 +3835,9 @@ document.title = `${window.TTT_TITLE} · Teddy & Tommy`;
      ("TOMMY SAYS: HERE!") → once you've played, his goodbye move → pop out.
    If it's the CPU's turn when he arrives, he waits for yours before he points. Calling him again while he's there
    brings another treat and points again (at the best square for the board as it is now).
+   In SPIN he doesn't give a hint: he makes mischief (Alan's idea). After the treat he either points at a mark and
+   FLIPS it (to empty, or X <-> O), or throws a 💣 that lands on a row or a column and BOOM, it's wiped clean. It isn't
+   anyone's turn and it isn't a spin, and he's on your side: a flip never finishes the CPU's line (js/rules.js).
    In 2 players both brothers are already at the board, so T is a high five (TTT.highFive): they run together,
    slap hands and run back. It doesn't change the game. */
 (function () {
@@ -3659,14 +3846,15 @@ document.title = `${window.TTT_TITLE} · Teddy & Tommy`;
   const TTT = (window.TTT = window.TTT || {});
   const { pick, emojiTexture, rand } = Kit.gfx;
 
-  const V = { pop: 0.35, treatAt: 2.1, throwAt: 2.4, helpAt: 2.7, byeAfter: 0.7, maxWait: 14 };
+  const V = { pop: 0.35, treatAt: 2.1, throwAt: 2.4, helpAt: 2.7, byeAfter: 0.7, maxWait: 14, flipAfter: 0.55, bombFlight: 0.8, misBye: 1.4 };
   const TREATS = [['🍦', 'ICE CREAM'], ['💧', 'WATER'], ['🧃', 'JUICE BOX'], ['🍪', 'COOKIE'], ['🍉', 'WATERMELON'], ['🍌', 'BANANA']];
 
   let api = null, entry = null, flyers = null;
   const actor = TTT.makeActor();
   // phase: off | in | here | bye | out
-  const b = { phase: 'off', t: 0, given: false, treatAt: V.treatAt, helped: -1, pointing: -1, movedAt: -1, calls: 0, treats: 0, hints: 0, lastTreat: null, popT: 0, lastHint: null };
+  const b = { phase: 'off', t: 0, given: false, treatAt: V.treatAt, helped: -1, pointing: -1, movedAt: -1, calls: 0, treats: 0, hints: 0, lastTreat: null, popT: 0, lastHint: null, mis: null, misDone: false, flips: 0, bombs: 0, lastMischief: null };
   const treat = { sprite: null, flyT: -1, emoji: '', from: new T.Vector3(), to: new T.Vector3() };
+  const bomb = { sprite: null, from: new T.Vector3(), to: new T.Vector3() };
   const tmp = new T.Vector3();
 
   function init(a) {
@@ -3675,6 +3863,10 @@ document.title = `${window.TTT_TITLE} · Teddy & Tommy`;
     treat.sprite.visible = false;
     treat.sprite.renderOrder = 22;
     TTT.stage.scene.add(treat.sprite);
+    bomb.sprite = new T.Sprite(new T.SpriteMaterial({ map: emojiTexture('💣'), depthWrite: false, depthTest: false, transparent: true }));
+    bomb.sprite.visible = false;
+    bomb.sprite.renderOrder = 22;
+    TTT.stage.scene.add(bomb.sprite);
     flyers = a.flyers;
     actor.attach(TTT.stage.scene, flyers);
     actor.visible = false;
@@ -3708,6 +3900,7 @@ document.title = `${window.TTT_TITLE} · Teddy & Tommy`;
     b.treatAt = b.t + 1.5;
     b.helped = -1;
     b.movedAt = -1;
+    if (!b.mis) b.misDone = false;
     b.popT = Math.max(b.popT, V.pop);
     api.toast(`${entry.name}'S HERE!`, 'buddy');
     TTT.sfx.pop();
@@ -3716,7 +3909,7 @@ document.title = `${window.TTT_TITLE} · Teddy & Tommy`;
 
   function summon() {
     const s = api.spot();
-    Object.assign(b, { phase: 'in', t: 0, given: false, treatAt: V.treatAt, helped: -1, pointing: -1, movedAt: -1, popT: 0 });
+    Object.assign(b, { phase: 'in', t: 0, given: false, treatAt: V.treatAt, helped: -1, pointing: -1, movedAt: -1, popT: 0, mis: null, misDone: false });
     actor.setScale(0.01);
     actor.place(s.x, 0, s.z);
     actor.face = null;
@@ -3735,13 +3928,15 @@ document.title = `${window.TTT_TITLE} · Teddy & Tommy`;
     actor.visible = false;
     treat.flyT = -1;
     if (treat.sprite) treat.sprite.visible = false;
+    if (bomb.sprite) bomb.sprite.visible = false;
+    b.mis = null;
     if (b.pointing >= 0 && api) api.clearHint();
     b.pointing = -1;
   }
 
   // You played a square: the hint has done its job.
   function moved() {
-    if (b.phase === 'here' && b.pointing >= 0) {
+    if (b.phase === 'here' && b.pointing >= 0 && !b.mis) {
       b.pointing = -1;
       b.movedAt = b.t;
     }
@@ -3817,8 +4012,12 @@ document.title = `${window.TTT_TITLE} · Teddy & Tommy`;
         b.given = true;
         giveTreat();
       }
-      // the hint: once the treat's on its way and it's your turn
-      if (b.given && b.t > Math.max(V.helpAt, b.treatAt + 0.5) && b.helped !== api.turnId() && b.movedAt < 0) {
+      const ready = b.given && b.t > Math.max(V.helpAt, b.treatAt + 0.5) && b.movedAt < 0;
+      // SPIN: mischief instead of a hint, once per call
+      if (api.mode() === 'spin') {
+        if (ready && !b.mis && !b.misDone) startMischief();
+      } else if (ready && b.helped !== api.turnId()) {
+        // the hint: once the treat's on its way and it's your turn
         const h = api.canHint() ? api.showHint() : null;
         if (h) {
           b.helped = api.turnId();
@@ -3830,6 +4029,7 @@ document.title = `${window.TTT_TITLE} · Teddy & Tommy`;
           TTT.sfx.nice();
         }
       }
+      updateMischief(dt);
       if (b.pointing >= 0) {
         // face the square and point at it
         TTT.stage.cellPos(b.pointing, tmp);
@@ -3838,7 +4038,7 @@ document.title = `${window.TTT_TITLE} · Teddy & Tommy`;
         if (actor.mode !== 'signature') actor.act('point', 0.3, 0);
       } else actor.face = null;
       // leave a moment after you've played, or if the round's over and nothing's left to do
-      const idle = b.given && b.pointing < 0 && treat.flyT < 0;
+      const idle = b.given && b.pointing < 0 && treat.flyT < 0 && !b.mis;
       if ((b.movedAt >= 0 && b.t > b.movedAt + V.byeAfter) || (idle && b.t > V.maxWait) || (idle && api.roundOver() && b.t > V.helpAt + 1.2)) {
         b.phase = 'bye';
         b.t = 0;
@@ -3861,6 +4061,74 @@ document.title = `${window.TTT_TITLE} · Teddy & Tommy`;
       }
     }
     actor.update(dt);
+  }
+
+  // ---------------------------------------------------------------- SPIN: a flip or a bomb
+
+  function startMischief() {
+    const act = api.mischief();
+    if (!act) {
+      b.misDone = true;
+      b.movedAt = b.t;
+      if (!api.roundOver()) api.toast(`${entry.name}: NOTHING TO FLIP YET!`, 'hint');
+      return;
+    }
+    b.mis = { act, t: 0 };
+    if (act.kind === 'flip') {
+      b.pointing = act.cell; // he points at it for a moment, then it flips
+    } else {
+      // a 💣 from his hand to the middle of the row or column
+      actor.act('give', 0.5, 0, true);
+      actor.root.updateMatrixWorld(true);
+      Kit.people.handWorld(actor.person, 1, bomb.from);
+      TTT.stage.cellPos(act.cells[1], bomb.to);
+      bomb.sprite.position.copy(bomb.from);
+      bomb.sprite.scale.setScalar(0.75);
+      bomb.sprite.visible = true;
+      TTT.sfx.whistle();
+    }
+  }
+
+  function updateMischief(dt) {
+    const m = b.mis;
+    if (!m) return;
+    m.t += dt;
+    if (api.roundOver()) {
+      // the round ended under him: never mind
+      bomb.sprite.visible = false;
+      b.mis = null;
+      b.misDone = true;
+      b.pointing = -1;
+      return;
+    }
+    const act = m.act;
+    let done = false;
+    if (act.kind === 'flip') done = m.t >= V.flipAfter;
+    else {
+      const k = Math.min(1, m.t / V.bombFlight);
+      bomb.sprite.position.lerpVectors(bomb.from, bomb.to, k);
+      bomb.sprite.position.y += Math.sin(k * Math.PI) * 2.4;
+      bomb.sprite.material.rotation = k * Math.PI * 3;
+      done = k >= 1;
+    }
+    if (!done) return;
+    bomb.sprite.visible = false;
+    bomb.sprite.material.rotation = 0;
+    b.pointing = -1;
+    b.mis = null;
+    b.misDone = true;
+    b.movedAt = b.t + V.misBye - V.byeAfter;
+    const ev = api.doMischief(act);
+    if (!ev) return;
+    b.lastMischief = { kind: ev.kind, axis: ev.axis, cells: ev.cells, win: ev.win };
+    if (ev.kind === 'flip') {
+      b.flips++;
+      api.toast(`${entry.name} FLIPPED ONE!`, 'save');
+    } else {
+      b.bombs++;
+      api.toast(`💣 ${entry.name} BOMBED A ${ev.axis === 'row' ? 'ROW' : 'COLUMN'}!`, 'save');
+    }
+    actor.react('hop');
   }
 
   // ---------------------------------------------------------------- 2 players: the high five
@@ -3939,6 +4207,7 @@ document.title = `${window.TTT_TITLE} · Teddy & Tommy`;
       return {
         phase: b.phase, id: entry && entry.id, t: +b.t.toFixed(2), given: b.given, pointing: b.pointing, calls: b.calls,
         treats: b.treats, hints: b.hints, lastTreat: b.lastTreat, lastHint: b.lastHint, pose: actor.pose,
+        flips: b.flips, bombs: b.bombs, lastMischief: b.lastMischief, mischiefOn: !!b.mis,
         x: +r.x.toFixed(2), z: +r.z.toFixed(2), scale: +actor.scale.toFixed(2), visible: actor.visible, flying: treat.flyT >= 0,
         highFives: hf.count, highFiving: hf.on,
       };
@@ -4539,11 +4808,71 @@ document.title = `${window.TTT_TITLE} · Teddy & Tommy`;
       return h;
     },
     clearHint: () => ST.hint(-1),
+    mode: () => G.mode,
+    // SPIN: his flip or bomb (js/rules.js mischief), chosen when he starts and done a moment later
+    mischief: () => (G.state === 'play' && G.round && !G.round.over && G.mode === 'spin' ? R.mischief(G.round, kid().mark) : null),
+    doMischief,
     players: () => [G.sides[0].actor, G.sides[1].actor],
     meet: () => spots.meet,
     homes: () => spots.sides,
     get flyers() { return flyers; },
   };
+
+  // Your brother's flip or bomb lands. The board may have changed since he picked it (a move in between): if that
+  // flip isn't allowed any more he picks again. Returns what happened, or null.
+  function doMischief(act) {
+    const st = G.round;
+    if (G.state !== 'play' || !st || st.over) return null;
+    const me = kid().mark;
+    if (act.kind === 'flip') {
+      const ok = R.mischiefOptions(st, me).flips.some((f) => f.cell === act.cell && f.to === act.to);
+      if (!ok) act = R.mischief(st, me);
+    } else if (!act.cells.some((i) => st.board[i])) act = R.mischief(st, me);
+    if (!act) return null;
+    const before = st.board.slice();
+    const ev = R.applyMischief(st, act);
+    if (!ev) return null;
+    const foe = G.sides[1];
+    if (ev.kind === 'flip') {
+      const i = ev.cells[0];
+      ST.spin(i, ev.from[0], ev.to[0], Math.random() < 0.5 ? 1 : -1);
+      TTT.sfx.spin(1);
+      const p = ST.cellPos(i);
+      bursts.add('FLIP!', p.x, ST.TOP + 1.2, p.z, 1.6, '#b8f5ff', '#2f7cf0');
+    } else {
+      ST.blast(ev.cells);
+      ST.shake(0.45);
+      TTT.sfx.boom();
+      const p = ST.cellPos(ev.cells[1]);
+      bursts.add('BOOM!', p.x, ST.TOP + 1.3, p.z, 2.2, '#ffd400', '#e8372c');
+      for (const i of ev.cells) {
+        const q = ST.cellPos(i);
+        flyers.add('💥', q.x, ST.TOP + 0.5, q.z, rand(-1, 1), rand(1.5, 3), 0.9, 0.6, rand(-3, 3), 2);
+        if (before[i]) flyers.add('💨', q.x, ST.TOP + 0.4, q.z, rand(-2, 2), rand(2, 4), 0.6, 0.9, rand(-2, 2), 3);
+      }
+    }
+    // who did it hit? the kid cheers when the CPU's marks went, and shrugs when it was his own
+    let mine = 0, theirs = 0;
+    ev.cells.forEach((i, k) => {
+      if (ev.from[k] === me) mine++;
+      else if (ev.from[k]) theirs++;
+    });
+    setTimeout(() => {
+      if (ev.win === me || theirs > mine) {
+        kid().actor.react('cheer');
+        foe.actor.react('oops');
+      } else if (mine > theirs) kid().actor.react('shrug');
+    }, 300);
+    ST.lock(st.lockRule && !st.over ? st.lock : -1);
+    if (ev.win) {
+      G.endEv = { gift: false };
+      G.endT = 0.9;
+      G.cpuT = -1;
+      G.waitT = -1;
+    }
+    updateTurnText();
+    return ev;
+  }
 
   // ---------------------------------------------------------------- input
 
@@ -4869,7 +5198,7 @@ Kit.help.setup({
     ['menu: REGULAR · SPIN', '1 · 2'],
     ['menu: Teddy or Tommy · 1 or 2 players · level', '← → · ↑ ↓ · L'],
   ],
-  note: 'SPIN: a tap turns a square one step. Teddy: empty → X → O → empty. Tommy: empty → O → X → empty.',
+  note: 'SPIN: a tap turns a square one step. Teddy: empty → X → O → empty. Tommy: empty → O → X → empty. Call your brother and he flips a mark or drops a 💣 on a row!',
   touch: 'Tap a square to play it. Tap your brother\'s face (bottom right) to call him.',
 });
 
@@ -4894,7 +5223,7 @@ Kit.help.setup({
     'Next round': '下一局', 'Home': '主页', 'Play again': '再玩一次', 'PLAY AGAIN': '再玩一次', 'Keep playing': '继续玩',
     'Start this round again': '这一局重新来',
     // canvas word bursts over the board (js/fx.js draws them through Kit.lang.t)
-    'NICE!': '好棋！', 'BLOCKED!': '堵住了！', 'SUPER!': '太棒了！', 'POOF!': '没啦！', 'OOPS!': '哎呀！',
+    'NICE!': '好棋！', 'BLOCKED!': '堵住了！', 'SUPER!': '太棒了！', 'FLIP!': '翻！', 'BOOM!': '轰！', 'POOF!': '没啦！', 'OOPS!': '哎呀！',
     // the ? panel (js/keys.js)
     'play a square (laid out like the number pad: 7 8 9 on top)': '下一个格子（和数字小键盘一样：7 8 9 在最上面）',
     'move round the board · play the square': '在棋盘上移动 · 下这个格子',
@@ -4902,8 +5231,8 @@ Kit.help.setup({
     'start this round again': '这一局重新来',
     'menu: REGULAR · SPIN': '菜单：普通模式 · 旋转模式',
     'menu: Teddy or Tommy · 1 or 2 players · level': '菜单：Teddy 还是 Tommy · 1 人或 2 人 · 难度',
-    'SPIN: a tap turns a square one step. Teddy: empty → X → O → empty. Tommy: empty → O → X → empty.':
-      '旋转模式：点一下，格子转一步。Teddy：空 → X → O → 空。Tommy：空 → O → X → 空。',
+    'SPIN: a tap turns a square one step. Teddy: empty → X → O → empty. Tommy: empty → O → X → empty. Call your brother and he flips a mark or drops a 💣 on a row!':
+      '旋转模式：点一下，格子转一步。Teddy：空 → X → O → 空。Tommy：空 → O → X → 空。叫兄弟来，他会翻掉一个，或者扔个 💣 炸掉一行！',
     "Tap a square to play it. Tap your brother's face (bottom right) to call him.": '点格子就能下棋。点右下角兄弟的头像，叫他来帮忙。',
   });
 
@@ -4919,6 +5248,10 @@ Kit.help.setup({
   L.rule(/^(\S+) WINS THE MATCH!$/, '$1 赢得比赛！');
   L.rule(/^(\S+) WINS!$/, '$1 赢啦！');
   L.rule(/^(\S+) SPUN IT FOR (\S+)!$/, '$1 帮 $2 转出来啦！');
+  L.rule(/^(\S+) FLIPPED ONE!$/, '$1 翻了一个！');
+  L.rule(/^💣 (\S+) BOMBED A ROW!$/, '💣 $1 炸掉了一行！');
+  L.rule(/^💣 (\S+) BOMBED A COLUMN!$/, '💣 $1 炸掉了一列！');
+  L.rule(/^(\S+): NOTHING TO FLIP YET!$/, '$1：还没有可以翻的！');
   L.rule(/^(\S+) (ICE CREAM|WATER|JUICE BOX|COOKIE|WATERMELON|BANANA) FROM (\S+)!$/, (m, emoji, item, who) => `${emoji} ${who} 给你${TREAT[item]}！`);
 })();
 
