@@ -5,7 +5,8 @@
             - every game against every possible opponent (the whole game tree, the CPU going first and second, and
               each of the CPU's equally good moves, since it picks among them at random);
             - plus many games against test bots (random, the 🐣 EASY CPU, a "kid" bot, itself).
-   SPIN     every game ends, with a winner or with the draw after SPIN_RULES.limit spins, never later:
+   SPIN     every game ends, with a winner or with the draw after SPIN_RULES.limit spins, never later
+            (the mirrored spin: X turns a square empty -> X -> O, O turns it empty -> O -> X):
             many games between the bots, the CPU on both levels and a bot that only ever spins one square.
    Sabotage, to prove the checks can fail:
             { sabotage: 'shallow' }  the NORMAL CPU only looks one move ahead -> the tree search finds lost games
@@ -33,12 +34,27 @@
       if (block.length && rng() < 0.4) return block[0];
       return BOTS.random(st, rng);
     },
+    // careful: always takes a win, never makes the other side's line, blocks a win it can see, otherwise anywhere
+    careful: (st, rng) => {
+      const me = st.turn, you = other(me);
+      const win = R.winsFor(st, me);
+      if (win.length) return win[0];
+      const all = R.legal(st);
+      const safe = st.mode === 'spin' ? all.filter((i) => !R.gives(st, i)) : all;
+      const block = safe.filter((i) => {
+        const t = R.clone(st);
+        R.play(t, i);
+        return !t.over && !R.winsFor(Object.assign({}, t, { turn: you, lock: -1 }), you).length;
+      });
+      const pool = block.length ? block : safe.length ? safe : all;
+      return pool[Math.floor(rng() * pool.length)];
+    },
     // SPIN: always the lowest square it may spin that doesn't finish any line (so it never wins or loses)
     staller: (st) => {
       const m = R.legal(st);
       for (const i of m) {
         const b = st.board.slice();
-        b[i] = R.spun(b[i]);
+        b[i] = R.spun(b[i], st.turn);
         if (!R.lineMask(b)) return i;
       }
       return m[0];
@@ -180,15 +196,18 @@
     }
     // a spin can hand the other side the win
     const st = R.newRound('spin', O, rules);
-    st.board = [1, 2, 2, 1, 0, 0, 0, 0, 0]; // O spins the bottom-left square: empty -> X finishes X's left column
+    st.board = [1, 2, 2, 1, 0, 0, 2, 0, 0]; // O spins its own bottom-left O into an X: X's left column
     const ev = R.play(st, 6);
-    if (!(ev && ev.win === X && ev.gift)) fail("spin: O spinning in X's column should hand X the win");
+    if (!(ev && ev.win === X && ev.gift)) fail("spin: O turning an O into an X in X's column should hand X the win");
     const st2 = R.newRound('spin', X, rules);
     st2.board = [2, 2, 1, 0, 0, 0, 0, 0, 0]; // X spins its own top-right X into an O: O's top row
     const ev2 = R.play(st2, 2);
     if (!(ev2 && ev2.win === O && ev2.gift)) fail("spin: X turning an X into an O in O's row should hand O the win");
+    // the mirrored spin: an empty square becomes the spinner's own mark, the other mark goes, your own turns over
+    const one = (v, m) => R.spun(v, m);
+    if (one(0, X) !== X || one(X, X) !== O || one(O, X) !== 0 || one(0, O) !== O || one(O, O) !== X || one(X, O) !== 0) fail('spin: the steps are wrong');
     // "both lines at once" can't happen: one spin changes one square into one mark, so from any board with no line
-    // it can only make lines of that mark. Every board and every spin:
+    // it can only make lines of that mark. Every board and every spin, by either side:
     let pairsSeen = 0;
     const b = [0, 0, 0, 0, 0, 0, 0, 0, 0];
     for (let code = 0; code < 19683; code++) {
@@ -199,10 +218,12 @@
       }
       if (R.lineMask(b)) continue;
       for (let i = 0; i < 9; i++) {
-        const v = b[i];
-        b[i] = R.spun(v);
-        if (R.lineMask(b) === 3) pairsSeen++;
-        b[i] = v;
+        for (const m of [X, O]) {
+          const v = b[i];
+          b[i] = R.spun(v, m);
+          if (R.lineMask(b) === 3) pairsSeen++;
+          b[i] = v;
+        }
       }
     }
     spin.bothLinesAtOnce = pairsSeen;
@@ -211,6 +232,32 @@
     return out;
   }
 
+  // Win rates of the kids' test bots against each CPU level, both modes, playing as Teddy and as Tommy in turn
+  // (who starts swaps every game). Not a pass / fail check: it's how the levels were tuned.
+  function rates(games = 1000, seed = 11) {
+    const rng = R.seeded(seed);
+    const out = {};
+    for (const mode of ['regular', 'spin']) {
+      for (const level of ['easy', 'normal']) {
+        for (const bot of ['random', 'kid', 'careful']) {
+          let kid = 0, cpu = 0, draw = 0;
+          for (let g = 0; g < games; g++) {
+            const kidMark = g % 2 ? X : O;
+            const st = R.newRound(mode, (g >> 1) % 2 ? X : O);
+            while (!st.over) R.play(st, st.turn === kidMark ? BOTS[bot](st, rng) : R.cpuMove(st, level, rng));
+            if (st.winner === kidMark) kid++;
+            else if (st.winner) cpu++;
+            else draw++;
+          }
+          const pc = (n) => Math.round((100 * n) / games) + '%';
+          out[`${mode} ${level} v ${bot}`] = `kid ${pc(kid)} · cpu ${pc(cpu)} · draw ${pc(draw)}`;
+        }
+      }
+    }
+    return out;
+  }
+
   TTT.check = check;
+  TTT.rates = rates;
   TTT.bots = BOTS;
 })(typeof window !== 'undefined' ? window : globalThis);

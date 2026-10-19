@@ -6,10 +6,14 @@
        3 4 5
        6 7 8
    REGULAR: on your turn put your mark on an empty square. Three in a row wins; a full board is a draw.
-   SPIN:    on your turn spin any one square one step: empty -> X -> O -> empty. After the spin a line of three X
-            is a win for X and a line of three O a win for O, whoever spun it. Both at once: the spinner wins.
-            SPIN_RULES.limit spins with no winner is a draw. SPIN_RULES.lock: the square the other player just spun
-            can't be spun straight back. */
+   SPIN:    on your turn spin any one square one step. Your tap makes YOUR mark first (Alan's pick, so it's fair for
+            both brothers): X (Teddy) spins empty -> X -> O -> empty, O (Tommy) spins the other way, empty -> O -> X
+            -> empty. So for both: tap an empty square and it's yours, tap your brother's mark and it's gone, tap your
+            own and it turns into his. After the spin a line of three X is a win for X and a line of three O a win
+            for O, whoever spun it (both at once can't happen: one spin makes one square one mark). SPIN_RULES.limit
+            spins with no winner is a draw. SPIN_RULES.lock (off): the square the other player just spun can't be spun
+            straight back. With that lock on, the first X to move could win in 3 spins every time in the one-way
+            version; without it, perfect play is a draw from either side. */
 (function (root) {
   'use strict';
   const TTT = (root.TTT = root.TTT || {});
@@ -18,7 +22,8 @@
   const LINES = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]];
   const SPIN_RULES = { limit: 30, lock: false };
   const other = (m) => 3 - m;
-  const spun = (v) => (v + 1) % 3;
+  // one spin of a square by `mark`: X turns it forwards (empty -> X -> O), O backwards (empty -> O -> X)
+  const spun = (v, mark) => (mark === O ? (v + 2) % 3 : (v + 1) % 3);
 
   // Which marks have a line of three: a bitmask (1 X, 2 O, 3 both), and the first line found for each.
   function linesOf(board) {
@@ -68,7 +73,7 @@
   function play(st, i) {
     if (!isLegal(st, i)) return null;
     const mark = st.turn, from = st.board[i];
-    const to = st.mode === 'regular' ? mark : spun(from);
+    const to = st.mode === 'regular' ? mark : spun(from, mark);
     st.board[i] = to;
     st.moves++;
     st.last = i;
@@ -141,8 +146,8 @@
 
   // ---------------------------------------------------------------- spin: search
 
-  // spins needed to turn a square into X (empty 1, X 0, O 2) and into O (empty 2, X 1, O 0)
-  const DX = [1, 0, 2], DO = [2, 1, 0];
+  // spins of your own needed to turn a square into your mark: X from (empty 1, X 0, O 2); O from (empty 1, X 2, O 0)
+  const DX = [1, 0, 2], DO = [1, 2, 0];
   const W = [0, 9, 3, 1, 0, 0, 0];
   // A rough score for the side to move: lines that are close to X's or O's (fewer spins to finish).
   function spinGuess(board, turn) {
@@ -164,7 +169,7 @@
     for (let i = 0; i < 9; i++) {
       if (lockRule && i === lock) continue;
       const v = board[i];
-      board[i] = spun(v);
+      board[i] = spun(v, turn);
       const m = lineMask(board);
       board[i] = v;
       if (m && (m === 3 || m === turn)) return WIN - ply;
@@ -172,7 +177,7 @@
     for (let i = 0; i < 9; i++) {
       if (lockRule && i === lock) continue;
       const v = board[i];
-      board[i] = spun(v);
+      board[i] = spun(v, turn);
       const m = lineMask(board);
       let score;
       if (m) score = -(WIN - ply); // only the other side's line: you gave it away
@@ -191,7 +196,7 @@
     const b = st.board.slice(), out = [];
     for (const i of legal(st)) {
       const v = b[i];
-      b[i] = spun(v);
+      b[i] = spun(v, st.turn);
       const m = lineMask(b);
       let score;
       if (m) score = m === 3 || m === st.turn ? WIN - 1 : -(WIN - 1);
@@ -219,7 +224,7 @@
         // the lock is the square just spun; when `mark` moves next, that lock applies to it only if it's its turn
         if (st.lockRule && i === st.lock && mark === st.turn) continue;
         const v = b[i];
-        b[i] = spun(v);
+        b[i] = spun(v, mark);
         const m = lineMask(b);
         if (m === 3 || m === mark) out.push(i);
         b[i] = v;
@@ -242,9 +247,13 @@
 
   // How the 🐣 EASY CPU plays: it takes a win it could make only this often, and blocks yours only this often.
   const EASY = { takeWin: 0.4, block: 0.3 };
+  // 🔥 NORMAL in SPIN: how many spins ahead it looks (yours and its own), and how often it doesn't look at all and
+  // spins any square that doesn't give you a line (so it can miss your threat). Careful play by both sides is always a
+  // draw at the spin limit, so without the slips a careful Teddy could never win. Your brother's hint looks further.
+  const LOOK = { normal: 3, slip: 0.08, hint: 4 };
 
   // The CPU's move. 'easy': plays at random, and sometimes takes a win or blocks one (EASY above).
-  // 'normal': perfect in REGULAR; a 5-move look-ahead in SPIN. Returns a square.
+  // 'normal': perfect in REGULAR; in SPIN a look-ahead with the odd slip (LOOK above). Returns a square.
   function cpuMove(st, level, rng = Math.random) {
     const moves = legal(st);
     if (!moves.length) return -1;
@@ -265,13 +274,19 @@
       }
       return pool[Math.floor(rng() * pool.length)];
     }
-    return bestOf(scores(st, 5), rng).cell;
+    if (st.mode === 'spin' && rng() < LOOK.slip) {
+      const win = winsFor(st, me);
+      if (win.length) return win[0];
+      const safe = moves.filter((i) => !gives(st, i));
+      if (safe.length) return safe[Math.floor(rng() * safe.length)];
+    }
+    return bestOf(scores(st, LOOK.normal), rng).cell;
   }
 
   // Would spinning square i make only the other side's line? (spin mode)
   function gives(st, i) {
     const b = st.board.slice();
-    b[i] = spun(b[i]);
+    b[i] = spun(b[i], st.turn);
     const m = lineMask(b);
     return m !== 0 && m !== 3 && m !== st.turn;
   }
@@ -283,7 +298,7 @@
     const me = st.turn, you = other(me);
     const win = winsFor(st, me);
     const threats = st.mode === 'regular' ? winsFor(st, you) : winsFor(Object.assign({}, st, { turn: you, lock: -1 }), you);
-    const all = scores(st, 6);
+    const all = scores(st, LOOK.hint);
     const best = bestOf(all, rng);
     if (win.length) return { cell: level === 'easy' ? best.cell : win[0], kind: 'win' };
     if (threats.length) {
@@ -303,8 +318,8 @@
     return { cell: best.cell, kind: 'good' };
   }
 
-  // What kind of move square i was, for the cheers: 'win', 'block', 'fork', 'threat', 'steal' (spin: X turned into O by
-  // O's player), 'erase' (spin: O wiped by X's player), 'center' (first move in the middle) or null. Call before play().
+  // What kind of move square i was, for the cheers: 'win', 'block', 'fork', 'threat', 'erase' (spin: your brother's
+  // mark wiped away), 'center' (first move in the middle), 'oops' (made the other side's line) or null. Call before play().
   function judge(st, i) {
     const me = st.turn, you = other(me);
     const before = st.mode === 'regular' ? winsFor(st, you) : winsFor(Object.assign({}, st, { turn: you, lock: -1 }), you);
@@ -317,8 +332,7 @@
     const mine = winsFor(Object.assign({}, t, { turn: me, lock: -1 }), me);
     if (mine.length >= 2) return 'fork';
     if (st.mode === 'spin') {
-      if (me === O && ev.from === X && ev.to === O) return 'steal';
-      if (me === X && ev.from === O && ev.to === EMPTY) return 'erase';
+      if (ev.from === you && ev.to === EMPTY) return 'erase';
     }
     if (mine.length === 1 && !afterYou.length) return 'threat';
     if (st.mode === 'regular' && st.moves === 0 && i === 4) return 'center';
@@ -338,7 +352,7 @@
   }
 
   TTT.rules = {
-    EMPTY, X, O, LINES, SPIN_RULES, EASY, other, spun, linesOf, lineMask, newRound, clone, legal, isLegal, play,
+    EMPTY, X, O, LINES, SPIN_RULES, EASY, LOOK, other, spun, linesOf, lineMask, newRound, clone, legal, isLegal, play,
     regularScores, spinScores, scores, winsFor, cpuMove, hint, judge, gives, seeded,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

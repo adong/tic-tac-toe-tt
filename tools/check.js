@@ -5,6 +5,7 @@
      node tools/check.js --sabotage shallow   proves the CPU check can fail: a one-move-deep CPU loses games
      node tools/check.js --sabotage nolimit   proves the spin check can fail: with no draw rule, games never end
      node tools/check.js --lock               SPIN with the "can't spin the square just spun" rule switched on
+     node tools/check.js rates                win rates of the kids' test bots against both levels (how they were tuned)
 */
 'use strict';
 const fs = require('fs');
@@ -23,6 +24,10 @@ const opt = (name) => {
   return i >= 0 ? args[i + 1] : undefined;
 };
 const t0 = Date.now();
+if (args[0] === 'rates') {
+  console.log(JSON.stringify(ctx.TTT.rates(+(args[1] || 1000)), null, 1));
+  process.exit(0);
+}
 const out = ctx.TTT.check({
   games: +(args.find((a) => /^\d+$/.test(a)) || 200),
   sabotage: opt('sabotage'),

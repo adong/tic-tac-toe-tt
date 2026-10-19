@@ -266,7 +266,7 @@
     return true;
   }
 
-  const WORDS = { block: 'BLOCKED!', fork: 'SUPER!', threat: 'NICE!', steal: 'GOTCHA!', erase: 'POOF!', center: 'NICE!', oops: 'OOPS!' };
+  const WORDS = { block: 'BLOCKED!', fork: 'SUPER!', threat: 'NICE!', erase: 'POOF!', center: 'NICE!', oops: 'OOPS!' };
   function react(kind, ev, s) {
     if (!kind || kind === 'win') return;
     const p = ST.cellPos(ev.cell);
@@ -282,7 +282,7 @@
       if (kind === 'block') TTT.sfx.block();
       else TTT.sfx.nice();
       s.actor.react('cheer');
-      if (kind === 'block' || kind === 'steal' || kind === 'erase' || kind === 'fork') foe.actor.react('oops');
+      if (kind === 'block' || kind === 'erase' || kind === 'fork') foe.actor.react('oops');
     }, 260);
   }
 
@@ -482,6 +482,7 @@
       el.textContent = s.mark === X ? '✕' : '◯';
     }
     ui.spinbar.style.display = G.mode === 'spin' ? '' : 'none';
+    cache.cycle = null;
     if (G.players === 1) {
       const bud = TTT.buddy.entry;
       ui.callBtn.innerHTML = `<img alt="" src="${art[bud.id]}"><kbd>T</kbd>`;
@@ -540,6 +541,12 @@
     ui.sideL.classList.toggle('now', !st.over && G.sides[0].mark === st.turn);
     ui.sideR.classList.toggle('now', !st.over && G.sides[1].mark === st.turn);
     setText(ui.spinCount, 'spins', `${st.spins} / ${st.limit}`);
+    // what a tap does for whoever is spinning now: empty -> their mark -> the other mark -> empty
+    if (st.mode === 'spin' && cache.cycle !== st.turn) {
+      cache.cycle = st.turn;
+      const chip = (m) => `<i class="chip ${m === X ? 'x' : 'o'}">${m === X ? '✕' : '◯'}</i>`;
+      ui.spinCycle.innerHTML = `<i></i><em>→</em>${chip(st.turn)}<em>→</em>${chip(R.other(st.turn))}<em>→</em><i></i>`;
+    }
   }
 
   function toast(text, cls) {
@@ -604,7 +611,7 @@
     if (!st || st.over || G.state !== 'play' || i < 0 || !R.isLegal(st, i)) return 0;
     const s = current();
     if (!s || !s.human) return 0;
-    return st.mode === 'regular' ? st.turn : R.spun(st.board[i]);
+    return st.mode === 'regular' ? st.turn : R.spun(st.board[i], st.turn);
   }
 
   function humanTap(i) {
@@ -802,7 +809,7 @@
       goRegular: $('goRegular'), goSpin: $('goSpin'), segPlayers: $('segPlayers'), segWho: $('segWho'), segLevel: $('segLevel'),
       duo: $('duo'), duoA: $('duoA'), duoB: $('duoB'), pauseBtn: $('pauseBtn'), muteBtn: $('muteBtn'), sideL: $('sideL'),
       sideR: $('sideR'), faceL: $('faceL'), faceR: $('faceR'), chipL: $('chipL'), chipR: $('chipR'), scoreL: $('scoreL'),
-      scoreR: $('scoreR'), dots: $('dots'), turn: $('turn'), spinbar: $('spinbar'), spinCount: $('spinCount'),
+      scoreR: $('scoreR'), dots: $('dots'), turn: $('turn'), spinbar: $('spinbar'), spinCount: $('spinCount'), spinCycle: $('spinCycle'),
       callBtn: $('callBtn'), toasts: $('toasts'), roundOver: $('roundOver'), rFace: $('rFace'), rTitle: $('rTitle'),
       rScore: $('rScore'), rNext: $('rNext'), rHome: $('rHome'), matchOver: $('matchOver'), mFace: $('mFace'),
       mTitle: $('mTitle'), mScore: $('mScore'), mAgain: $('mAgain'), mHome: $('mHome'), pause: $('pause'),
@@ -871,6 +878,7 @@
       return game.info();
     },
     check: (opts) => TTT.check(opts),
+    rates: (n) => TTT.rates(n),        // win rates of the test bots against both levels (how they were tuned)
     info() {
       const st = G.round;
       return {

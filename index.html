@@ -98,21 +98,25 @@
   .tiles { display: flex; gap: clamp(12px, 3vmin, 28px); }
   .tile {
     position: relative; width: clamp(140px, 25vmin, 250px); aspect-ratio: 1 / 0.86; border-radius: 32px; border: 6px solid #fff;
-    box-shadow: 0 9px 0 var(--ink); overflow: hidden; transition: transform 0.08s; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4%;
+    box-shadow: 0 9px 0 var(--ink); overflow: hidden; transition: transform 0.08s; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3%; padding-top: 10%;
   }
   .tile:hover { transform: translateY(-3px) rotate(-1deg); }
   .tile.reg { background: radial-gradient(circle at 50% 35%, #fff3c4, #ffc93c); }
   .tile.spin { background: radial-gradient(circle at 50% 35%, #d8f4ff, #4ab8ff); }
   .tile b { font-family: var(--display); font-weight: 400; font-size: clamp(20px, 3.8vmin, 34px); color: #fff; -webkit-text-stroke: 2.5px var(--ink); paint-order: stroke fill; text-shadow: 0 3px 0 var(--ink); }
-  .tile .go { position: absolute; right: 6px; top: 6px; width: 24%; aspect-ratio: 1; border-radius: 50%; background: linear-gradient(160deg, #8ef56b, #2dbf4e); border: 4px solid #fff; box-shadow: 0 4px 0 var(--ink); display: grid; place-items: center; font-size: clamp(18px, 3.6vmin, 32px); }
-  .minigrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; width: 46%; aspect-ratio: 1; padding: 5px; border-radius: 12px; background: #c98a4b; box-shadow: 0 4px 0 rgba(20,18,31,.35); }
+  .tile .go { position: absolute; right: 5px; top: 5px; width: 21%; aspect-ratio: 1; border-radius: 50%; background: linear-gradient(160deg, #8ef56b, #2dbf4e); border: 4px solid #fff; box-shadow: 0 4px 0 var(--ink); display: grid; place-items: center; font-size: clamp(18px, 3.6vmin, 32px); }
+  .minigrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; width: 39%; aspect-ratio: 1; padding: 5px; border-radius: 12px; background: #c98a4b; box-shadow: 0 4px 0 rgba(20,18,31,.35); }
   .minigrid i { border-radius: 6px; background: #fff7e4; display: grid; place-items: center; font-style: normal; font-family: var(--display); font-size: clamp(12px, 2.6vmin, 24px); line-height: 1; }
   .minigrid i.win { background: #fff27a; }
-  .cycle { display: flex; align-items: center; gap: 2px; font-family: var(--display); font-size: clamp(22px, 4.4vmin, 40px); line-height: 1; }
+  /* the SPIN tile: Teddy's taps go empty -> X -> O (top row), Tommy's go empty -> O -> X (bottom row) */
+  .cycles { display: flex; flex-direction: column; gap: 6%; width: 78%; align-items: center; }
+  .cycle { display: flex; align-items: center; gap: 2px; font-family: var(--display); font-size: clamp(17px, 3.3vmin, 31px); line-height: 1; }
   .cycle .sq { width: 1.15em; height: 1.15em; border-radius: 0.26em; background: #fff7e4; display: grid; place-items: center; box-shadow: 0 3px 0 rgba(20,18,31,.35); animation: flip 2.4s ease-in-out infinite; }
   .cycle .sq:nth-child(3) { animation-delay: 0.8s; }
   .cycle .sq:nth-child(5) { animation-delay: 1.6s; }
-  .cycle .arr { color: #fff; font-size: 0.6em; -webkit-text-stroke: 2px var(--ink); paint-order: stroke fill; }
+  .cycle .arr { font-size: 0.7em; -webkit-text-stroke: 2px var(--ink); paint-order: stroke fill; }
+  .cycle.tx .arr { color: #8cc2ff; }
+  .cycle.to .arr { color: #ffb02e; }
   @keyframes flip { 0%, 30%, 100% { transform: rotateX(0); } 15% { transform: rotateX(180deg) translateY(-4px); } }
   .opts { display: flex; flex-direction: column; align-items: center; gap: clamp(8px, 1.6vh, 14px); }
   .seg { display: flex; gap: 8px; }
@@ -135,6 +139,8 @@
     .logo big { font-size: 34px; text-shadow: 0 4px 0 var(--ink); }
     .tile { width: 118px; border-width: 4px; border-radius: 24px; }
     .tile b { font-size: 16px; }
+    .tile .go { display: none; } /* the whole tile is the button; no room for the ▶ here */
+    .cycle { font-size: 14px; }
     .seg button { height: 44px; font-size: 14px; border-radius: 16px; padding: 0 10px 0 6px; }
     .opts { gap: 6px; }
     .duo { font-size: 14px; }
@@ -245,7 +251,7 @@
       <b>REGULAR</b><span class="go">▶</span>
     </button>
     <button class="tile spin" id="goSpin" title="Spin (2)" aria-label="Spin">
-      <span class="cycle"><span class="sq chip x">✕</span><span class="arr">→</span><span class="sq chip o">◯</span><span class="arr">→</span><span class="sq"></span></span>
+      <span class="cycles"><span class="cycle tx"><span class="sq"></span><span class="arr">→</span><span class="sq chip x">✕</span><span class="arr">→</span><span class="sq chip o">◯</span></span><span class="cycle to"><span class="sq"></span><span class="arr">→</span><span class="sq chip o">◯</span><span class="arr">→</span><span class="sq chip x">✕</span></span></span>
       <b>SPIN</b><span class="go">▶</span>
     </button>
   </div>
@@ -277,7 +283,7 @@
         <div class="side" id="sideR"><b id="scoreR">0</b><i class="chip" id="chipR"></i><img id="faceR" alt=""></div>
       </div>
       <div class="turn" id="turn"></div>
-      <div class="spinbar" id="spinbar"><span class="cyc"><i class="chip x">✕</i><em>→</em><i class="chip o">◯</i><em>→</em><i></i></span><span class="count">🌀 <b id="spinCount">0</b></span></div>
+      <div class="spinbar" id="spinbar"><span class="cyc" id="spinCycle"></span><span class="count">🌀 <b id="spinCount">0</b></span></div>
     </div>
     <button class="ibtn" id="muteBtn" title="Sound (M)" aria-label="Sound on or off">🔊</button>
   </div>
